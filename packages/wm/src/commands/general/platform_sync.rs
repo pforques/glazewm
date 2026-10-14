@@ -12,6 +12,7 @@ use wm_platform::{CornerStyle, OpacityValue};
 use wm_platform::{Rect, WindowZOrder};
 
 use crate::{
+  commands::workspace::sync_workspace_partners,
   models::{Container, WindowContainer},
   traits::{CommonGetters, PositionGetters, WindowGetters},
   user_config::UserConfig,
@@ -22,6 +23,9 @@ pub fn platform_sync(
   state: &mut WmState,
   config: &UserConfig,
 ) -> anyhow::Result<()> {
+  // Keep linked workspaces displayed together before syncing anything.
+  sync_workspace_partners(state, config)?;
+
   let focused_container =
     state.focused_container().context("No focused container.")?;
 

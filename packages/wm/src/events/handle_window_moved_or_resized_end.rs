@@ -230,7 +230,8 @@ fn drop_as_tiling_window(
     config,
   )?;
 
-  let should_split = nearest_container.is_tiling_window()
+  let should_split = config.fixed_tiling_direction().is_none()
+    && nearest_container.is_tiling_window()
     && match tiling_direction {
       TilingDirection::Horizontal => {
         drop_position == DropPosition::Top

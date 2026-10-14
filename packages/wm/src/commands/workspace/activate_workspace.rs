@@ -51,11 +51,13 @@ pub fn activate_workspace(
 
   let monitor_rect = target_monitor.to_rect()?;
 
-  let tiling_direction = if monitor_rect.height() > monitor_rect.width() {
-    TilingDirection::Vertical
-  } else {
-    TilingDirection::Horizontal
-  };
+  let tiling_direction = config.fixed_tiling_direction().unwrap_or(
+    if monitor_rect.height() > monitor_rect.width() {
+      TilingDirection::Vertical
+    } else {
+      TilingDirection::Horizontal
+    },
+  );
 
   let workspace = Workspace::new(
     workspace_config.clone(),

@@ -1,7 +1,7 @@
 use anyhow::Context;
 use tracing::info;
 
-use super::activate_workspace;
+use super::{activate_workspace, display_workspace_partners};
 use crate::{
   commands::{
     container::set_focused_descendant, workspace::deactivate_workspace,
@@ -69,7 +69,10 @@ pub fn focus_workspace(
     state
       .pending_sync
       .queue_container_to_redraw(displayed_workspace)
-      .queue_container_to_redraw(target_workspace);
+      .queue_container_to_redraw(target_workspace.clone());
+
+    // Display the rest of the workspace's group on the other monitors.
+    display_workspace_partners(&target_workspace, state, config)?;
 
     // Get empty workspace to destroy (if one is found). Cannot destroy
     // empty workspaces if they're the only workspace on the monitor.

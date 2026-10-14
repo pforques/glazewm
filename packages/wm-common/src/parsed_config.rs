@@ -4,7 +4,7 @@ use wm_platform::{
   RectDelta,
 };
 
-use crate::app_command::InvokeCommand;
+use crate::{app_command::InvokeCommand, TilingDirection};
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(default, rename_all(serialize = "camelCase"))]
@@ -17,6 +17,7 @@ pub struct ParsedConfig {
   pub window_effects: WindowEffectsConfig,
   pub window_rules: Vec<WindowRuleConfig>,
   pub workspaces: Vec<WorkspaceConfig>,
+  pub workspace_groups: Vec<WorkspaceGroupConfig>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -96,6 +97,10 @@ pub struct GeneralConfig {
 
   /// Affects which windows get shown in the native Windows taskbar.
   pub show_all_in_taskbar: bool,
+
+  /// What to do when the OS focuses a window that is in a hidden
+  /// workspace (e.g. when relaunching an already open app).
+  pub hidden_window_focus: HiddenWindowFocusBehavior,
 }
 
 impl Default for GeneralConfig {
@@ -118,8 +123,23 @@ impl Default for GeneralConfig {
         }
       },
       show_all_in_taskbar: false,
+      hidden_window_focus: HiddenWindowFocusBehavior::default(),
     }
   }
+}
+
+/// Behavior for when the OS focuses a window in a hidden workspace.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HiddenWindowFocusBehavior {
+  /// Switch to the workspace of the focused window.
+  #[default]
+  SwitchWorkspace,
+
+  /// Move the window into the currently focused workspace instead of
+  /// switching. Windows that were managed within the last few seconds
+  /// keep the placement from their window rules.
+  MoveToFocusedWorkspace,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -173,6 +193,16 @@ pub struct WindowBehaviorConfig {
   /// changes the defaults for when the state change commands, like
   /// `set_floating`, are used without any flags.
   pub state_defaults: WindowStateDefaultsConfig,
+
+  /// Forces all workspaces to use this tiling direction. When set, split
+  /// containers are never created, `toggle-tiling-direction` and
+  /// `set-tiling-direction` have no effect, and moving a window
+  /// perpendicular to this direction sends it to the adjacent monitor.
+  pub fixed_tiling_direction: Option<TilingDirection>,
+
+  /// Whether `focus --direction` along the tiling direction swaps the
+  /// single visible tiling window with the workspace's minimized windows.
+  pub swap_minimized_on_focus: bool,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
@@ -385,6 +415,22 @@ pub struct WorkspaceConfig {
 
   #[serde(default = "default_bool::<false>")]
   pub keep_alive: bool,
+}
+
+/// A group of workspaces that are always displayed together (one per
+/// monitor), e.g. to treat two monitors as a single "desktop".
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all(serialize = "camelCase"))]
+pub struct WorkspaceGroupConfig {
+  /// Unique name of the group (used by `--workspace-group`).
+  pub name: String,
+
+  #[serde(default)]
+  pub display_name: Option<String>,
+
+  /// Names of the workspaces in the group. Each workspace should be
+  /// bound to a different monitor.
+  pub workspaces: Vec<String>,
 }
 
 /// Helper function for setting a default value for a boolean field.

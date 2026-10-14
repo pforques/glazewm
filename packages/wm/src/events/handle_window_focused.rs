@@ -1,11 +1,14 @@
 use anyhow::Context;
 use tracing::info;
-use wm_common::{DisplayState, WindowRuleEvent, WmEvent};
+use wm_common::{
+  DisplayState, HiddenWindowFocusBehavior, WindowRuleEvent, WmEvent,
+};
 use wm_platform::NativeWindow;
 
 use crate::{
   commands::{
-    container::set_focused_descendant, window::run_window_rules,
+    container::set_focused_descendant,
+    window::{move_window_to_workspace, run_window_rules},
     workspace::focus_workspace,
   },
   models::WorkspaceTarget,
@@ -57,7 +60,7 @@ pub fn handle_window_focused(
   state.pending_sync.queue_focused_effect_update();
 
   if let Some(window) = found_window {
-    let workspace = window.workspace().context("No workspace")?;
+    let mut workspace = window.workspace().context("No workspace")?;
 
     // Native focus has been synced to the WM's focused container.
     if focused_container == window.clone().into() {
@@ -70,15 +73,38 @@ pub fn handle_window_focused(
 
     // Handle focus events from windows on hidden workspaces. For example,
     // if Discord is forcefully shown by the OS when it's on a hidden
-    // workspace, switch focus to Discord's workspace.
+    // workspace, either switch focus to Discord's workspace or bring
+    // Discord to the focused workspace.
     if window.display_state() == DisplayState::Hidden {
-      info!("Focusing off-screen window: {window}");
+      let focused_workspace = focused_container.workspace();
 
-      focus_workspace(
-        WorkspaceTarget::Name(workspace.config().name),
-        state,
-        config,
-      )?;
+      match focused_workspace {
+        Some(focused_workspace)
+          if config.value.general.hidden_window_focus
+            == HiddenWindowFocusBehavior::MoveToFocusedWorkspace
+            && !state.is_recently_managed(&window.id()) =>
+        {
+          info!("Moving off-screen window to focused workspace: {window}");
+
+          move_window_to_workspace(
+            window.clone(),
+            WorkspaceTarget::Name(focused_workspace.config().name),
+            state,
+            config,
+          )?;
+
+          workspace = window.workspace().context("No workspace")?;
+        }
+        _ => {
+          info!("Focusing off-screen window: {window}");
+
+          focus_workspace(
+            WorkspaceTarget::Name(workspace.config().name),
+            state,
+            config,
+          )?;
+        }
+      }
     }
 
     // Update the WM's focus state.

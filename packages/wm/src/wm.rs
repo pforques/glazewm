@@ -31,8 +31,8 @@ use crate::{
       update_window_state, WindowPositionTarget,
     },
     workspace::{
-      focus_workspace, move_workspace_in_direction,
-      update_workspace_config,
+      focus_workspace, focus_workspace_group, move_window_to_workspace_group,
+      move_workspace_in_direction, update_workspace_config,
     },
   },
   events::{
@@ -265,7 +265,7 @@ impl WindowManager {
       }
       InvokeCommand::Focus(args) => {
         if let Some(direction) = &args.direction {
-          focus_in_direction(&subject_container, direction, state)?;
+          focus_in_direction(&subject_container, direction, state, config)?;
         }
 
         if let Some(direction) = &args.workspace_in_direction {
@@ -286,6 +286,10 @@ impl WindowManager {
             state,
             config,
           )?;
+        }
+
+        if let Some(group_name) = &args.workspace_group {
+          focus_workspace_group(group_name, state, config)?;
         }
 
         if let Some(monitor_index) = &args.monitor {
@@ -361,6 +365,15 @@ impl WindowManager {
               move_window_to_workspace(
                 window.clone(),
                 WorkspaceTarget::Name(name.clone()),
+                state,
+                config,
+              )?;
+            }
+
+            if let Some(group_name) = &args.workspace_group {
+              move_window_to_workspace_group(
+                window.clone(),
+                group_name,
                 state,
                 config,
               )?;

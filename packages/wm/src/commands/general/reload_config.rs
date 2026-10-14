@@ -7,7 +7,10 @@ use wm_common::{WindowRuleEvent, WmEvent};
 use wm_platform::NativeWindowWindowsExt;
 
 use crate::{
-  commands::{window::run_window_rules, workspace::sort_workspaces},
+  commands::{
+    container::apply_fixed_tiling_direction, window::run_window_rules,
+    workspace::sort_workspaces,
+  },
   traits::{CommonGetters, TilingSizeGetters, WindowGetters},
   user_config::UserConfig,
   wm::WindowManager,
@@ -36,6 +39,8 @@ pub fn reload_config(
   update_workspace_configs(state, config)?;
 
   update_container_gaps(state, config);
+
+  apply_fixed_tiling_direction(state, config)?;
 
   #[cfg(target_os = "windows")]
   update_window_effects(&old_config, state, config)?;

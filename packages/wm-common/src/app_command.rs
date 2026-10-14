@@ -321,6 +321,11 @@ pub struct InvokeFocusCommand {
   #[clap(long)]
   pub workspace: Option<String>,
 
+  /// Name of a workspace group (see `workspace_groups` config) to focus.
+  /// All workspaces of the group get displayed on their monitors.
+  #[clap(long)]
+  pub workspace_group: Option<String>,
+
   #[clap(long)]
   pub monitor: Option<usize>,
 
@@ -361,6 +366,12 @@ pub struct InvokeMoveCommand {
   /// Name of workspace to move the window.
   #[clap(long)]
   pub workspace: Option<String>,
+
+  /// Name of a workspace group (see `workspace_groups` config) to move
+  /// the window to. The window keeps its monitor when the group has a
+  /// workspace on it.
+  #[clap(long)]
+  pub workspace_group: Option<String>,
 
   #[clap(long)]
   pub next_active_workspace: bool,

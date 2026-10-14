@@ -53,6 +53,7 @@ pub fn manage_window(
 
   if let Some(window) = updated_window {
     info!("New window managed: {window}");
+    state.mark_window_managed(window.id());
 
     state.emit_event(WmEvent::WindowManaged {
       managed_window: window.to_dto()?,

@@ -68,6 +68,18 @@ fn move_tiling_window(
     .direction_container()
     .context("No direction container.")?;
 
+  // With a fixed tiling direction, perpendicular moves send the window to
+  // the adjacent monitor instead of creating split containers.
+  if config.fixed_tiling_direction().is_some_and(|fixed_direction| {
+    fixed_direction != TilingDirection::from_direction(direction)
+  }) {
+    return move_to_workspace_in_direction(
+      &window_to_move.into(),
+      direction,
+      state,
+    );
+  }
+
   let has_matching_tiling_direction = parent.tiling_direction()
     == TilingDirection::from_direction(direction);
 

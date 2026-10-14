@@ -4,16 +4,33 @@ use wm_platform::Direction;
 
 use super::set_focused_descendant;
 use crate::{
+  commands::window::swap_with_minimized_window,
   models::{Container, TilingContainer},
   traits::{CommonGetters, TilingDirectionGetters, WindowGetters},
+  user_config::UserConfig,
   wm_state::WmState,
 };
 
+/// Focuses the container in the given direction from the origin
+/// container.
+///
+/// With `window_behavior.swap_minimized_on_focus` enabled, focusing
+/// left/right from the only visible tiling window instead swaps it with a
+/// minimized window of the workspace.
 pub fn focus_in_direction(
   origin_container: &Container,
   direction: &Direction,
   state: &mut WmState,
+  config: &UserConfig,
 ) -> anyhow::Result<()> {
+  if config.value.window_behavior.swap_minimized_on_focus {
+    if let Container::TilingWindow(window) = origin_container {
+      if swap_with_minimized_window(window, direction, state, config)? {
+        return Ok(());
+      }
+    }
+  }
+
   let focus_target = match origin_container {
     Container::TilingWindow(_) => {
       // If a suitable focus target isn't found in the current workspace,

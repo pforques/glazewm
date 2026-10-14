@@ -1,3 +1,4 @@
+mod apply_fixed_tiling_direction;
 mod attach_container;
 mod detach_container;
 mod flatten_child_split_containers;
@@ -11,6 +12,7 @@ mod set_focused_descendant;
 mod toggle_tiling_direction;
 mod wrap_in_split_container;
 
+pub use apply_fixed_tiling_direction::*;
 pub use attach_container::*;
 pub use detach_container::*;
 pub use flatten_child_split_containers::*;

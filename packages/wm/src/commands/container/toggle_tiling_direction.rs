@@ -9,11 +9,18 @@ use crate::{
   wm_state::WmState,
 };
 
+/// Toggles the tiling direction of the given window or workspace.
+///
+/// No-op when `window_behavior.fixed_tiling_direction` is set.
 pub fn toggle_tiling_direction(
   container: Container,
   state: &mut WmState,
   config: &UserConfig,
 ) -> anyhow::Result<()> {
+  if config.fixed_tiling_direction().is_some() {
+    return Ok(());
+  }
+
   let direction_container = match container {
     Container::TilingWindow(tiling_window) => {
       toggle_window_direction(tiling_window, config)
@@ -80,6 +87,9 @@ fn toggle_window_direction(
   Ok(split_container.into())
 }
 
+/// Sets the tiling direction of the given window or workspace.
+///
+/// No-op when `window_behavior.fixed_tiling_direction` is set.
 pub fn set_tiling_direction(
   container: Container,
   state: &mut WmState,

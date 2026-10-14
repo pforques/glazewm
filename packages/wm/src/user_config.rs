@@ -3,7 +3,8 @@ use std::{collections::HashMap, env, fs, path::PathBuf};
 use anyhow::{Context, Result};
 use wm_common::{
   InvokeCommand, KeybindingConfig, MatchType, ParsedConfig,
-  WindowMatchConfig, WindowRuleConfig, WindowRuleEvent, WorkspaceConfig,
+  TilingDirection, WindowMatchConfig, WindowRuleConfig, WindowRuleEvent,
+  WorkspaceConfig, WorkspaceGroupConfig,
 };
 
 use crate::{
@@ -73,6 +74,7 @@ impl UserConfig {
     // TODO: Improve error formatting of serde_yaml errors. Something
     // similar to https://github.com/AlexanderThaller/format_serde_error
     let config_value = serde_yaml::from_str(&config_str)?;
+    validate_workspace_groups(&config_value)?;
 
     Ok((config_value, config_str))
   }
@@ -351,6 +353,47 @@ impl UserConfig {
     });
   }
 
+  /// Gets the workspace group config with the given name.
+  pub fn workspace_group(
+    &self,
+    group_name: &str,
+  ) -> Option<&WorkspaceGroupConfig> {
+    self
+      .value
+      .workspace_groups
+      .iter()
+      .find(|group| group.name == group_name)
+  }
+
+  /// Gets the workspace group that contains the given workspace.
+  pub fn workspace_group_for_workspace(
+    &self,
+    workspace_name: &str,
+  ) -> Option<&WorkspaceGroupConfig> {
+    workspace_group_for_workspace(&self.value, workspace_name)
+  }
+
+  /// Gets the names of the other workspaces in the same group as the
+  /// given workspace. Empty if the workspace isn't grouped.
+  pub fn workspace_partners(&self, workspace_name: &str) -> Vec<String> {
+    self
+      .workspace_group_for_workspace(workspace_name)
+      .map(|group| {
+        group
+          .workspaces
+          .iter()
+          .filter(|name| *name != workspace_name)
+          .cloned()
+          .collect()
+      })
+      .unwrap_or_default()
+  }
+
+  /// Tiling direction that all workspaces are forced to use, if any.
+  pub fn fixed_tiling_direction(&self) -> Option<TilingDirection> {
+    self.value.window_behavior.fixed_tiling_direction.clone()
+  }
+
   /// Keybinding configs that should be active for the current binding mode
   /// and pause state.
   ///
@@ -376,5 +419,170 @@ impl UserConfig {
         true
       }
     })
+  }
+}
+
+/// Gets the workspace group that contains the given workspace.
+fn workspace_group_for_workspace<'a>(
+  config_value: &'a ParsedConfig,
+  workspace_name: &str,
+) -> Option<&'a WorkspaceGroupConfig> {
+  config_value
+    .workspace_groups
+    .iter()
+    .find(|group| group.workspaces.iter().any(|name| name == workspace_name))
+}
+
+/// Validates the `workspace_groups` section of the config.
+///
+/// Group names must be unique, groups must reference existing workspaces,
+/// and a workspace can belong to at most one group.
+fn validate_workspace_groups(
+  config_value: &ParsedConfig,
+) -> anyhow::Result<()> {
+  let mut seen_groups = Vec::<&str>::new();
+  let mut seen_workspaces = HashMap::<&str, &str>::new();
+
+  for group in &config_value.workspace_groups {
+    if seen_groups.contains(&group.name.as_str()) {
+      anyhow::bail!("Duplicate workspace group name '{}'.", group.name);
+    }
+
+    seen_groups.push(&group.name);
+
+    if group.workspaces.is_empty() {
+      anyhow::bail!("Workspace group '{}' has no workspaces.", group.name);
+    }
+
+    for workspace_name in &group.workspaces {
+      if !config_value
+        .workspaces
+        .iter()
+        .any(|workspace| workspace.name == *workspace_name)
+      {
+        anyhow::bail!(
+          "Workspace group '{}' references unknown workspace '{}'.",
+          group.name,
+          workspace_name
+        );
+      }
+
+      if let Some(other_group) =
+        seen_workspaces.insert(workspace_name, &group.name)
+      {
+        anyhow::bail!(
+          "Workspace '{}' is in multiple workspace groups ('{}' and '{}').",
+          workspace_name,
+          other_group,
+          group.name
+        );
+      }
+    }
+  }
+
+  Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+  use wm_common::{
+    HiddenWindowFocusBehavior, ParsedConfig, TilingDirection,
+  };
+
+  use super::{validate_workspace_groups, workspace_group_for_workspace};
+
+  const GROUPED_CONFIG: &str = r#"
+general:
+  hidden_window_focus: "move_to_focused_workspace"
+window_behavior:
+  fixed_tiling_direction: "horizontal"
+  swap_minimized_on_focus: true
+workspaces:
+  - name: "1"
+    bind_to_monitor: 1
+  - name: "2"
+    bind_to_monitor: 0
+  - name: "3"
+    bind_to_monitor: 1
+  - name: "4"
+    bind_to_monitor: 0
+workspace_groups:
+  - name: "main"
+    display_name: "Main"
+    workspaces: ["1", "2"]
+  - name: "dev"
+    workspaces: ["3", "4"]
+"#;
+
+  fn parse(yaml: &str) -> ParsedConfig {
+    serde_yaml::from_str(yaml).expect("Config should parse.")
+  }
+
+  #[test]
+  fn parses_fork_options() {
+    let config = parse(GROUPED_CONFIG);
+
+    assert_eq!(
+      config.general.hidden_window_focus,
+      HiddenWindowFocusBehavior::MoveToFocusedWorkspace
+    );
+    assert_eq!(
+      config.window_behavior.fixed_tiling_direction,
+      Some(TilingDirection::Horizontal)
+    );
+    assert!(config.window_behavior.swap_minimized_on_focus);
+    assert_eq!(config.workspace_groups.len(), 2);
+    assert_eq!(
+      config.workspace_groups[0].display_name.as_deref(),
+      Some("Main")
+    );
+    assert!(validate_workspace_groups(&config).is_ok());
+  }
+
+  #[test]
+  fn fork_options_default_to_upstream_behavior() {
+    let config = parse("workspaces: [{ name: '1' }]");
+
+    assert_eq!(
+      config.general.hidden_window_focus,
+      HiddenWindowFocusBehavior::SwitchWorkspace
+    );
+    assert_eq!(config.window_behavior.fixed_tiling_direction, None);
+    assert!(!config.window_behavior.swap_minimized_on_focus);
+    assert!(config.workspace_groups.is_empty());
+  }
+
+  #[test]
+  fn finds_group_of_workspace() {
+    let config = parse(GROUPED_CONFIG);
+
+    let group = workspace_group_for_workspace(&config, "4");
+    assert_eq!(group.map(|group| group.name.as_str()), Some("dev"));
+    assert!(workspace_group_for_workspace(&config, "9").is_none());
+  }
+
+  #[test]
+  fn rejects_invalid_groups() {
+    let unknown_workspace = parse(
+      "workspaces: [{ name: '1' }]
+workspace_groups: [{ name: 'a', workspaces: ['1', '2'] }]",
+    );
+    assert!(validate_workspace_groups(&unknown_workspace).is_err());
+
+    let shared_workspace = parse(
+      "workspaces: [{ name: '1' }, { name: '2' }]
+workspace_groups:
+  - { name: 'a', workspaces: ['1', '2'] }
+  - { name: 'b', workspaces: ['2'] }",
+    );
+    assert!(validate_workspace_groups(&shared_workspace).is_err());
+
+    let duplicate_name = parse(
+      "workspaces: [{ name: '1' }, { name: '2' }]
+workspace_groups:
+  - { name: 'a', workspaces: ['1'] }
+  - { name: 'a', workspaces: ['2'] }",
+    );
+    assert!(validate_workspace_groups(&duplicate_name).is_err());
   }
 }

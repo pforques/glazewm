@@ -1,4 +1,7 @@
-use std::time::Instant;
+use std::{
+  collections::HashMap,
+  time::{Duration, Instant},
+};
 
 use anyhow::Context;
 use tokio::sync::mpsc::{self};
@@ -27,6 +30,9 @@ use crate::{
   user_config::UserConfig,
 };
 
+/// How long a window is considered to be newly managed.
+const RECENTLY_MANAGED_DURATION: Duration = Duration::from_secs(5);
+
 pub struct WmState {
   /// Root node of the container tree. Monitors are the children of the
   /// root node, followed by workspaces, then split containers/windows.
@@ -53,6 +59,12 @@ pub struct WmState {
   ///
   /// Used to decide whether to override incoming focus events.
   pub unmanaged_or_minimized_timestamp: Option<Instant>,
+
+  /// Times at which windows were recently managed, keyed by container ID.
+  ///
+  /// Used for `general.hidden_window_focus` to leave newly launched
+  /// windows on the workspace assigned by their window rules.
+  recently_managed_windows: HashMap<Uuid, Instant>,
 
   /// Configs of currently enabled binding modes.
   pub binding_modes: Vec<BindingModeConfig>,
@@ -90,6 +102,7 @@ impl WmState {
       prev_effects_window: None,
       recent_workspace_name: None,
       unmanaged_or_minimized_timestamp: None,
+      recently_managed_windows: HashMap::new(),
       binding_modes: Vec::new(),
       ignored_windows: Vec::new(),
       is_paused: false,
@@ -168,6 +181,24 @@ impl WmState {
 
   pub fn monitors(&self) -> Vec<Monitor> {
     self.root_container.monitors()
+  }
+
+  /// Records that the window with the given ID has just been managed.
+  pub fn mark_window_managed(&mut self, window_id: Uuid) {
+    self
+      .recently_managed_windows
+      .retain(|_, time| time.elapsed() < RECENTLY_MANAGED_DURATION);
+
+    self.recently_managed_windows.insert(window_id, Instant::now());
+  }
+
+  /// Whether the window with the given ID was managed within the last few
+  /// seconds.
+  pub fn is_recently_managed(&self, window_id: &Uuid) -> bool {
+    self
+      .recently_managed_windows
+      .get(window_id)
+      .is_some_and(|time| time.elapsed() < RECENTLY_MANAGED_DURATION)
   }
 
   pub fn workspaces(&self) -> Vec<Workspace> {
