@@ -135,10 +135,12 @@ window_behavior:
   # monitor. Allowed values: 'horizontal', 'vertical'.
   # fixed_tiling_direction: 'horizontal'
 
-  # Whether `focus --direction` along the tiling direction swaps the only
-  # visible tiling window with the workspace's minimized windows (restores
-  # the next/previous minimized window and minimizes the current one).
-  swap_minimized_on_focus: false
+  # Whether `focus --direction` along the tiling direction (e.g. left/right
+  # with 'horizontal') cycles through all windows of the workspace,
+  # including minimized ones, in a stable order that wraps around. A
+  # minimized window is restored and swapped with the focused tiling
+  # window, and restored windows keep their position in the workspace.
+  cycle_focus: false
 
 workspaces:
   - name: '1'

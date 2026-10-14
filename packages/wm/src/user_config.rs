@@ -498,7 +498,7 @@ general:
   hidden_window_focus: "move_to_focused_workspace"
 window_behavior:
   fixed_tiling_direction: "horizontal"
-  swap_minimized_on_focus: true
+  cycle_focus: true
 workspaces:
   - name: "1"
     bind_to_monitor: 1
@@ -539,7 +539,7 @@ workspace_groups:
       config.window_behavior.fixed_tiling_direction,
       Some(TilingDirection::Horizontal)
     );
-    assert!(config.window_behavior.swap_minimized_on_focus);
+    assert!(config.window_behavior.cycle_focus);
     assert_eq!(config.workspace_groups.len(), 2);
     assert_eq!(
       config.workspace_groups[0].display_name.as_deref(),
@@ -557,7 +557,7 @@ workspace_groups:
       HiddenWindowFocusBehavior::SwitchWorkspace
     );
     assert_eq!(config.window_behavior.fixed_tiling_direction, None);
-    assert!(!config.window_behavior.swap_minimized_on_focus);
+    assert!(!config.window_behavior.cycle_focus);
     assert!(config.workspace_groups.is_empty());
   }
 

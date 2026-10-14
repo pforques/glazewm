@@ -49,36 +49,47 @@ fn set_tiling(
   let workspace =
     window.workspace().context("Window has no workspace.")?;
 
-  // Check whether insertion target is still valid.
+  // With `cycle_focus`, windows directly in the workspace are restored in
+  // place, so that the workspace's window order stays stable.
+  let keep_position = config.value.window_behavior.cycle_focus
+    && window.parent() == Some(workspace.clone().into());
+
+  // Check whether insertion target is still valid. When keeping the
+  // position, it is only used for sizing.
   let insertion_target =
     window.insertion_target().filter(|insertion_target| {
-      insertion_target
-        .target_parent
-        .workspace()
-        .is_some_and(|workspace| workspace.is_displayed())
+      keep_position
+        || insertion_target
+          .target_parent
+          .workspace()
+          .is_some_and(|workspace| workspace.is_displayed())
     });
 
   // Get the position in the tree to insert the new tiling window. This
   // will be the window's previous tiling position if it has one, or
   // instead beside the last focused tiling window in the workspace.
-  let (target_parent, target_index) = insertion_target
-    .as_ref()
-    .map(|insertion_target| {
-      (
-        insertion_target.target_parent.clone(),
-        insertion_target.target_index,
-      )
-    })
-    // Fallback to the last focused tiling window within the workspace.
-    .or_else(|| {
-      let focused_window = workspace
-        .descendant_focus_order()
-        .find(Container::is_tiling_window)?;
+  let (target_parent, target_index) = if keep_position {
+    (workspace.clone().into(), window.index())
+  } else {
+    insertion_target
+      .as_ref()
+      .map(|insertion_target| {
+        (
+          insertion_target.target_parent.clone(),
+          insertion_target.target_index,
+        )
+      })
+      // Fallback to the last focused tiling window within the workspace.
+      .or_else(|| {
+        let focused_window = workspace
+          .descendant_focus_order()
+          .find(Container::is_tiling_window)?;
 
-      Some((focused_window.parent()?, focused_window.index() + 1))
-    })
-    // Default to inserting at the end of the workspace.
-    .unwrap_or((workspace.clone().into(), workspace.child_count()));
+        Some((focused_window.parent()?, focused_window.index() + 1))
+      })
+      // Default to inserting at the end of the workspace.
+      .unwrap_or((workspace.clone().into(), workspace.child_count()))
+  };
 
   let tiling_window = window.to_tiling(config.value.gaps.clone());
 

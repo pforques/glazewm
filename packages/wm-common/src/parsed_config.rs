@@ -200,9 +200,12 @@ pub struct WindowBehaviorConfig {
   /// perpendicular to this direction sends it to the adjacent monitor.
   pub fixed_tiling_direction: Option<TilingDirection>,
 
-  /// Whether `focus --direction` along the tiling direction swaps the
-  /// single visible tiling window with the workspace's minimized windows.
-  pub swap_minimized_on_focus: bool,
+  /// Whether `focus --direction` along the workspace's tiling direction
+  /// cycles through all windows of the workspace (including minimized
+  /// ones) in workspace order, wrapping around. A minimized target is
+  /// restored and swapped with the focused tiling window. Windows also
+  /// keep their position in the workspace when restored.
+  pub cycle_focus: bool,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
