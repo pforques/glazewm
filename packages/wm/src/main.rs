@@ -11,7 +11,13 @@
 
 #[cfg(target_os = "macos")]
 use std::io::IsTerminal;
-use std::{env, path::PathBuf, process, time::Duration};
+use std::{
+  env,
+  path::PathBuf,
+  process,
+  sync::atomic::{AtomicBool, Ordering},
+  time::Duration,
+};
 
 use anyhow::{Context, Error};
 use tokio::{process::Command, signal};
@@ -30,11 +36,12 @@ use wm_platform::{
 };
 
 use crate::{
-  ipc_server::IpcServer, sys_tray::SystemTray, user_config::UserConfig,
-  wm::WindowManager,
+  diagnostics::EventDiagnostics, ipc_server::IpcServer,
+  sys_tray::SystemTray, user_config::UserConfig, wm::WindowManager,
 };
 
 mod commands;
+mod diagnostics;
 mod events;
 mod ipc_server;
 mod models;
@@ -173,13 +180,15 @@ async fn start_wm(
     &mut config,
   ) {
     tracing::error!("{:?}", err);
-    dispatcher.show_error_dialog("Non-fatal error", &err.to_string());
+    show_non_fatal_error_dialog(dispatcher, &err.to_string());
   }
 
   // Create an interval for periodically cleaning up invalid windows.
   let mut cleanup_interval = tokio::time::interval(Duration::from_secs(5));
   cleanup_interval
     .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+  let mut diagnostics = EventDiagnostics::start();
 
   loop {
     let res = tokio::select! {
@@ -197,25 +206,35 @@ async fn start_wm(
       },
       Some(event) = mouse_listener.next_event() => {
         tracing::debug!("Received mouse event: {:?}", event);
-        wm.process_event(PlatformEvent::Mouse(event), &mut config)
+        diagnostics.track("mouse", format!("{event:?}"), || {
+          wm.process_event(PlatformEvent::Mouse(event), &mut config)
+        })
       },
       Some(event) = window_listener.next_event() => {
         tracing::debug!("Received window event: {:?}", event);
-        wm.process_event(PlatformEvent::Window(event), &mut config)
+        diagnostics.track("window", format!("{event:?}"), || {
+          wm.process_event(PlatformEvent::Window(event), &mut config)
+        })
       },
       Some(()) = display_listener.next_event() => {
         tracing::debug!("Received display settings changed event.");
-        wm.process_event(PlatformEvent::DisplaySettingsChanged, &mut config)
+        diagnostics.track("display", String::from("DisplaySettingsChanged"), || {
+          wm.process_event(PlatformEvent::DisplaySettingsChanged, &mut config)
+        })
       },
       Some(event) = keybinding_listener.next_event() => {
         tracing::debug!("Received keyboard event: {:?}", event);
-        wm.process_event(PlatformEvent::Keybinding(event), &mut config)
+        diagnostics.track("keybinding", format!("{event:?}"), || {
+          wm.process_event(PlatformEvent::Keybinding(event), &mut config)
+        })
       }
       _ = cleanup_interval.tick() => {
         if wm.state.is_paused {
           Ok(())
         } else {
-          wm.state.cleanup_invalid_windows()
+          diagnostics.track("cleanup", String::from("cleanup_invalid_windows"), || {
+            wm.state.cleanup_invalid_windows()
+          })
         }
       },
       Some((
@@ -225,15 +244,17 @@ async fn start_wm(
       )) = ipc_server.message_rx.recv() => {
         tracing::info!("Received IPC message: {:?}", message);
 
-        if let Err(err) = ipc_server.process_message(
-          message,
-          &response_tx,
-          &disconnection_tx,
-          &mut wm,
-          &mut config,
-        ) {
-          tracing::error!("{:?}", err);
-        }
+        diagnostics.track("ipc", format!("{message:?}"), || {
+          if let Err(err) = ipc_server.process_message(
+            message,
+            &response_tx,
+            &disconnection_tx,
+            &mut wm,
+            &mut config,
+          ) {
+            tracing::error!("{:?}", err);
+          }
+        });
 
         Ok(())
       },
@@ -285,7 +306,7 @@ async fn start_wm(
 
     if let Err(err) = res {
       tracing::error!("{:?}", err);
-      dispatcher.show_error_dialog("Non-fatal error", &err.to_string());
+      show_non_fatal_error_dialog(dispatcher, &err.to_string());
     }
   }
 
@@ -295,16 +316,49 @@ async fn start_wm(
   Ok(())
 }
 
+/// Shows a non-fatal error dialog without blocking the WM's main loop.
+///
+/// The dialog is shown from a separate thread, since a modal dialog on the
+/// main loop would freeze window management (and swallow keybindings)
+/// until dismissed. Errors raised while a dialog is already open are only
+/// logged, to avoid stacking dialogs.
+fn show_non_fatal_error_dialog(dispatcher: &Dispatcher, message: &str) {
+  static IS_DIALOG_OPEN: AtomicBool = AtomicBool::new(false);
+
+  if IS_DIALOG_OPEN.swap(true, Ordering::AcqRel) {
+    return;
+  }
+
+  let dispatcher = dispatcher.clone();
+  let message = message.to_string();
+
+  let spawn_res = std::thread::Builder::new()
+    .name("wm-error-dialog".to_string())
+    .spawn(move || {
+      dispatcher.show_error_dialog("Non-fatal error", &message);
+      IS_DIALOG_OPEN.store(false, Ordering::Release);
+    });
+
+  if let Err(err) = spawn_res {
+    tracing::warn!("Failed to show error dialog: {err}");
+    IS_DIALOG_OPEN.store(false, Ordering::Release);
+  }
+}
+
 /// Initialize logging with the specified verbosity level.
 ///
-/// Error logs are saved to `~/.glzr/glazewm/errors.log`.
+/// Error logs are saved to `~/.glzr/glazewm/errors.log`, and warnings
+/// (including freeze diagnostics) to `~/.glzr/glazewm/diagnostics.log`.
 fn setup_logging(verbosity: &Verbosity) -> anyhow::Result<()> {
   let error_log_dir = home::home_dir()
     .context("Unable to get home directory.")?
     .join(".glzr/glazewm/");
 
   let error_writer =
-    tracing_appender::rolling::never(error_log_dir, "errors.log");
+    tracing_appender::rolling::never(&error_log_dir, "errors.log");
+
+  let diagnostics_writer =
+    tracing_appender::rolling::never(&error_log_dir, "diagnostics.log");
 
   let subscriber = tracing_subscriber::registry()
     .with(
@@ -316,6 +370,12 @@ fn setup_logging(verbosity: &Verbosity) -> anyhow::Result<()> {
       // Output to error log file.
       fmt::Layer::new()
         .with_writer(error_writer.with_max_level(Level::ERROR)),
+    )
+    .with(
+      // Output to diagnostics log file.
+      fmt::Layer::new()
+        .with_ansi(false)
+        .with_writer(diagnostics_writer.with_max_level(Level::WARN)),
     );
 
   tracing::subscriber::set_global_default(subscriber)?;
