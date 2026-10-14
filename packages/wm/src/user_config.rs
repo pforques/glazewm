@@ -489,7 +489,9 @@ mod tests {
     HiddenWindowFocusBehavior, ParsedConfig, TilingDirection,
   };
 
-  use super::{validate_workspace_groups, workspace_group_for_workspace};
+  use super::{
+    validate_workspace_groups, workspace_group_for_workspace, SAMPLE_CONFIG,
+  };
 
   const GROUPED_CONFIG: &str = r#"
 general:
@@ -516,6 +518,13 @@ workspace_groups:
 
   fn parse(yaml: &str) -> ParsedConfig {
     serde_yaml::from_str(yaml).expect("Config should parse.")
+  }
+
+  #[test]
+  fn sample_config_is_valid() {
+    let config = parse(SAMPLE_CONFIG);
+
+    assert!(validate_workspace_groups(&config).is_ok());
   }
 
   #[test]
