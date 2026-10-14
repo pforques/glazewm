@@ -298,7 +298,10 @@ fn redraw_containers(
     } else if had_pending_dpi_adjustment
       && !window.has_pending_dpi_adjustment()
     {
-      tracing::info!("Window repositioned across DPI change: {window}");
+      tracing::info!(
+        target: crate::diagnostics::LOG_TARGET,
+        "Window repositioned across DPI change: {window}"
+      );
       state.mark_dpi_transition(window.id());
     }
 

@@ -23,8 +23,10 @@ use anyhow::{Context, Error};
 use tokio::{process::Command, signal};
 use tracing::Level;
 use tracing_subscriber::{
+  filter::Targets,
   fmt::{self, writer::MakeWriterExt},
   layer::SubscriberExt,
+  Layer,
 };
 use wm_common::{AppCommand, InvokeCommand, Verbosity, WmEvent};
 #[cfg(target_os = "macos")]
@@ -372,10 +374,15 @@ fn setup_logging(verbosity: &Verbosity) -> anyhow::Result<()> {
         .with_writer(error_writer.with_max_level(Level::ERROR)),
     )
     .with(
-      // Output to diagnostics log file.
+      // Output freeze diagnostics and errors to diagnostics log file.
       fmt::Layer::new()
         .with_ansi(false)
-        .with_writer(diagnostics_writer.with_max_level(Level::WARN)),
+        .with_writer(diagnostics_writer)
+        .with_filter(
+          Targets::new()
+            .with_default(Level::ERROR)
+            .with_target(diagnostics::LOG_TARGET, Level::INFO),
+        ),
     );
 
   tracing::subscriber::set_global_default(subscriber)?;

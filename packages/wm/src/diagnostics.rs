@@ -13,6 +13,10 @@ use std::{
   time::{Duration, Instant},
 };
 
+/// Log target of freeze diagnostics. Logs with this target are written to
+/// `diagnostics.log` from the `INFO` level.
+pub const LOG_TARGET: &str = "glazewm::diagnostics";
+
 /// Processing time above which an event is logged as slow.
 const SLOW_EVENT_THRESHOLD: Duration = Duration::from_millis(250);
 

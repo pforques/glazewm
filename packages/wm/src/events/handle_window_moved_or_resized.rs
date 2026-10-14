@@ -249,7 +249,10 @@ pub fn handle_window_moved_or_resized(
       if frame_diverged(&frame_position, &expected_frame)
         && state.take_dpi_transition_reassert(&window.id())
       {
-        tracing::info!("Reasserting frame after DPI change: {window}");
+        tracing::info!(
+          target: crate::diagnostics::LOG_TARGET,
+          "Reasserting frame after DPI change: {window}"
+        );
         state.pending_sync.queue_container_to_redraw(window.clone());
       }
 
