@@ -289,10 +289,17 @@ fn redraw_containers(
       DisplayState::Showing | DisplayState::Shown
     );
 
+    let had_pending_dpi_adjustment = window.has_pending_dpi_adjustment();
+
     if let Err(err) =
       reposition_window(window, *hide_corner, &z_order, is_visible, config)
     {
       tracing::warn!("Failed to set window position: {}", err);
+    } else if had_pending_dpi_adjustment
+      && !window.has_pending_dpi_adjustment()
+    {
+      tracing::info!("Window repositioned across DPI change: {window}");
+      state.mark_dpi_transition(window.id());
     }
 
     // Whether the window is either transitioning to or from fullscreen.
@@ -454,9 +461,12 @@ fn reposition_window(
           // When there's a mismatch between the DPI of the monitor and the
           // window, the window might be sized incorrectly after the first
           // move. If we set the position twice, inconsistencies after the
-          // first move are resolved.
+          // first move are resolved. The adjustment is only needed once
+          // per monitor change, so the flag is cleared afterwards (it was
+          // previously never cleared, doubling the cost of every redraw).
           if window.has_pending_dpi_adjustment() {
             window.native().set_window_pos(z_order, &rect, swp_flags)?;
+            window.set_has_pending_dpi_adjustment(false);
           }
         }
       }

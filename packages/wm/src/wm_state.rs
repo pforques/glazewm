@@ -33,6 +33,14 @@ use crate::{
 /// How long a window is considered to be newly managed.
 const RECENTLY_MANAGED_DURATION: Duration = Duration::from_secs(5);
 
+/// How long a window's move/resize events are attributed to the OS
+/// rescaling it after it crossed monitors with different DPI.
+const DPI_TRANSITION_DURATION: Duration = Duration::from_millis(1500);
+
+/// Maximum number of times the WM reasserts a window's position during a
+/// DPI transition, to rule out a redraw loop with apps that resist.
+const DPI_TRANSITION_MAX_REASSERTS: u8 = 2;
+
 pub struct WmState {
   /// Root node of the container tree. Monitors are the children of the
   /// root node, followed by workspaces, then split containers/windows.
@@ -65,6 +73,11 @@ pub struct WmState {
   /// Used for `general.hidden_window_focus` to leave newly launched
   /// windows on the workspace assigned by their window rules.
   recently_managed_windows: HashMap<Uuid, Instant>,
+
+  /// Windows that were just repositioned onto a monitor with a different
+  /// DPI, mapped to when that happened and the remaining number of
+  /// position reasserts.
+  dpi_transitions: HashMap<Uuid, (Instant, u8)>,
 
   /// Configs of currently enabled binding modes.
   pub binding_modes: Vec<BindingModeConfig>,
@@ -103,6 +116,7 @@ impl WmState {
       recent_workspace_name: None,
       unmanaged_or_minimized_timestamp: None,
       recently_managed_windows: HashMap::new(),
+      dpi_transitions: HashMap::new(),
       binding_modes: Vec::new(),
       ignored_windows: Vec::new(),
       is_paused: false,
@@ -199,6 +213,42 @@ impl WmState {
       .recently_managed_windows
       .get(window_id)
       .is_some_and(|time| time.elapsed() < RECENTLY_MANAGED_DURATION)
+  }
+
+  /// Records that the window with the given ID was just repositioned
+  /// onto a monitor with a different DPI.
+  pub fn mark_dpi_transition(&mut self, window_id: Uuid) {
+    self
+      .dpi_transitions
+      .retain(|_, (time, _)| time.elapsed() < DPI_TRANSITION_DURATION);
+
+    self
+      .dpi_transitions
+      .insert(window_id, (Instant::now(), DPI_TRANSITION_MAX_REASSERTS));
+  }
+
+  /// Whether the window with the given ID is in a DPI transition, i.e. its
+  /// frame changes are likely caused by the OS rescaling it.
+  pub fn is_in_dpi_transition(&self, window_id: &Uuid) -> bool {
+    self
+      .dpi_transitions
+      .get(window_id)
+      .is_some_and(|(time, _)| time.elapsed() < DPI_TRANSITION_DURATION)
+  }
+
+  /// Consumes one position reassert for a window in a DPI transition.
+  ///
+  /// Returns `false` once the window has no reasserts left.
+  pub fn take_dpi_transition_reassert(&mut self, window_id: &Uuid) -> bool {
+    match self.dpi_transitions.get_mut(window_id) {
+      Some((time, reasserts))
+        if time.elapsed() < DPI_TRANSITION_DURATION && *reasserts > 0 =>
+      {
+        *reasserts -= 1;
+        true
+      }
+      _ => false,
+    }
   }
 
   pub fn workspaces(&self) -> Vec<Workspace> {

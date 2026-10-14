@@ -16,7 +16,7 @@ use crate::{
   },
   events::handle_window_moved_or_resized_end,
   models::{Monitor, NonTilingWindow, WindowContainer},
-  traits::{CommonGetters, WindowGetters},
+  traits::{CommonGetters, PositionGetters, WindowGetters},
   user_config::UserConfig,
   wm_state::WmState,
 };
@@ -223,6 +223,37 @@ pub fn handle_window_moved_or_resized(
         window.set_display_state(display_state);
         return Ok(());
       }
+    }
+
+    // A window that just crossed monitors with a different DPI gets
+    // rescaled by the OS (`WM_DPICHANGED`) after being positioned. Don't
+    // infer a fullscreen/maximize change from that rescale, since that
+    // could ping-pong indefinitely between the stale and corrected frames
+    // (freeze with stacked monitors of different scaling). Instead,
+    // reassert the expected frame a bounded number of times.
+    if !is_maximized
+      && state.is_in_dpi_transition(&window.id())
+      && matches!(
+        window.state(),
+        WindowState::Tiling
+          | WindowState::Fullscreen(FullscreenStateConfig {
+            maximized: false,
+            ..
+          })
+      )
+    {
+      let expected_frame = window
+        .to_rect()?
+        .apply_delta(&window.total_border_delta()?, None);
+
+      if frame_diverged(&frame_position, &expected_frame)
+        && state.take_dpi_transition_reassert(&window.id())
+      {
+        tracing::info!("Reasserting frame after DPI change: {window}");
+        state.pending_sync.queue_container_to_redraw(window.clone());
+      }
+
+      return Ok(());
     }
 
     let should_fullscreen = {
@@ -539,11 +570,33 @@ fn is_in_corner(window_frame: &Rect, monitor_rect: &Rect) -> bool {
   (is_left_corner || is_right_corner) && is_bottom_of_monitor
 }
 
+/// Whether the window's frame differs from the expected frame by more than
+/// a couple of pixels on any edge.
+fn frame_diverged(frame: &Rect, expected_frame: &Rect) -> bool {
+  const TOLERANCE_PX: i32 = 2;
+
+  (frame.left - expected_frame.left).abs() > TOLERANCE_PX
+    || (frame.top - expected_frame.top).abs() > TOLERANCE_PX
+    || (frame.right - expected_frame.right).abs() > TOLERANCE_PX
+    || (frame.bottom - expected_frame.bottom).abs() > TOLERANCE_PX
+}
+
 #[cfg(test)]
 mod tests {
   use wm_platform::Rect;
 
-  use super::is_in_corner;
+  use super::{frame_diverged, is_in_corner};
+
+  #[test]
+  fn detects_diverged_frames() {
+    let expected = Rect::from_xy(0, -1080, 960, 1080);
+
+    assert!(!frame_diverged(&expected, &expected));
+    assert!(!frame_diverged(&Rect::from_xy(1, -1081, 961, 1080), &expected));
+
+    // Rescaled by the OS from 100% to 125% DPI.
+    assert!(frame_diverged(&Rect::from_xy(0, -1080, 1200, 1350), &expected));
+  }
 
   #[test]
   fn matches_corner_positions() {
