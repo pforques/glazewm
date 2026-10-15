@@ -18,6 +18,9 @@ pub fn handle_display_settings_changed(
 ) -> anyhow::Result<()> {
   tracing::info!("Display settings changed.");
 
+  let prev_monitor_count = state.monitors().len();
+  let prev_groups_active = state.workspace_groups_active(config);
+
   // Ignore the event if retrieval of the displays or their properties
   // fails (can happen transiently during sleep/wake).
   let displays = try_warn!(state
@@ -118,6 +121,24 @@ pub fn handle_display_settings_changed(
   state
     .pending_sync
     .queue_container_to_redraw(state.root_container.clone());
+
+  let monitor_count = state.monitors().len();
+
+  if monitor_count != prev_monitor_count {
+    state.mark_monitor_count_changed();
+
+    // The OS focused window may have been moved to a hidden workspace, so
+    // make sure focus is synced to the WM's focused container.
+    state.pending_sync.queue_focus_change();
+
+    let groups_active = state.workspace_groups_active(config);
+
+    tracing::info!(
+      target: crate::diagnostics::LOG_TARGET,
+      "Monitor count changed: {prev_monitor_count} -> {monitor_count} \
+       (workspace groups active: {prev_groups_active} -> {groups_active})."
+    );
+  }
 
   Ok(())
 }

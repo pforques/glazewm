@@ -181,6 +181,37 @@ pub struct KeybindingConfig {
 
   /// WM commands to run when the keybinding is triggered.
   pub commands: Vec<InvokeCommand>,
+
+  /// Condition under which the keybinding is active. Always active if
+  /// unset.
+  ///
+  /// Allows the same key to run different commands depending on e.g.
+  /// whether workspace groups are active.
+  pub when: Option<KeybindingCondition>,
+}
+
+/// Condition for a keybinding to be active.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum KeybindingCondition {
+  /// Workspace groups are configured and more than one monitor is
+  /// connected (i.e. linked desktops are in effect).
+  WorkspaceGroupsActive,
+
+  /// Workspace groups are not in effect (none are configured, or only a
+  /// single monitor is connected).
+  WorkspaceGroupsInactive,
+}
+
+impl KeybindingCondition {
+  /// Whether the condition is met for the given workspace groups state.
+  #[must_use]
+  pub fn is_met(self, workspace_groups_active: bool) -> bool {
+    match self {
+      Self::WorkspaceGroupsActive => workspace_groups_active,
+      Self::WorkspaceGroupsInactive => !workspace_groups_active,
+    }
+  }
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -422,6 +453,9 @@ pub struct WorkspaceConfig {
 
 /// A group of workspaces that are always displayed together (one per
 /// monitor), e.g. to treat two monitors as a single "desktop".
+///
+/// Groups only take effect while more than one monitor is connected. With
+/// a single monitor, all workspaces behave independently.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all(serialize = "camelCase"))]
 pub struct WorkspaceGroupConfig {

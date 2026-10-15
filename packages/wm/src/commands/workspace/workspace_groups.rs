@@ -17,12 +17,17 @@ use crate::{
 ///
 /// Inactive partners are activated. Partners that are on the same monitor
 /// as the given workspace are skipped. No-op if the workspace isn't part
-/// of a workspace group.
+/// of a workspace group, or if workspace groups aren't in effect (single
+/// monitor).
 pub fn display_workspace_partners(
   workspace: &Workspace,
   state: &mut WmState,
   config: &UserConfig,
 ) -> anyhow::Result<()> {
+  if !state.workspace_groups_active(config) {
+    return Ok(());
+  }
+
   let workspace_name = workspace.config().name;
   let monitor = workspace.monitor().context("Workspace has no monitor.")?;
 
@@ -74,7 +79,7 @@ pub fn sync_workspace_partners(
   state: &mut WmState,
   config: &UserConfig,
 ) -> anyhow::Result<()> {
-  if config.value.workspace_groups.is_empty() {
+  if !state.workspace_groups_active(config) {
     return Ok(());
   }
 

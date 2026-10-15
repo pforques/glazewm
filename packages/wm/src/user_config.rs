@@ -389,20 +389,32 @@ impl UserConfig {
       .unwrap_or_default()
   }
 
+  /// Whether workspace groups are in effect with the given number of
+  /// connected monitors.
+  ///
+  /// Groups display their workspaces on separate monitors, so they only
+  /// apply when groups are configured and there's more than one monitor.
+  /// With a single monitor, every workspace behaves independently.
+  pub fn workspace_groups_active(&self, monitor_count: usize) -> bool {
+    workspace_groups_active(&self.value, monitor_count)
+  }
+
   /// Tiling direction that all workspaces are forced to use, if any.
   pub fn fixed_tiling_direction(&self) -> Option<TilingDirection> {
     self.value.window_behavior.fixed_tiling_direction.clone()
   }
 
-  /// Keybinding configs that should be active for the current binding mode
-  /// and pause state.
+  /// Keybinding configs that should be active for the current binding
+  /// mode, pause state and workspace groups state.
   ///
   /// When paused, only the configs with `InvokeCommand::WmTogglePause` are
-  /// returned so that unpausing remains possible.
+  /// returned so that unpausing remains possible. Configs with a `when`
+  /// condition are only returned if the condition is met.
   pub fn active_keybinding_configs(
     &self,
     binding_modes: &[wm_common::BindingModeConfig],
     is_paused: bool,
+    workspace_groups_active: bool,
   ) -> impl Iterator<Item = KeybindingConfig> {
     let source_configs = if let Some(first_mode) = binding_modes.first() {
       &first_mode.keybindings
@@ -412,14 +424,26 @@ impl UserConfig {
     .clone();
 
     source_configs.into_iter().filter(move |kb| {
-      if is_paused {
-        kb.commands
-          .contains(&wm_common::InvokeCommand::WmTogglePause)
-      } else {
-        true
-      }
+      let is_condition_met = kb
+        .when
+        .is_none_or(|condition| condition.is_met(workspace_groups_active));
+
+      is_condition_met
+        && (!is_paused
+          || kb
+            .commands
+            .contains(&wm_common::InvokeCommand::WmTogglePause))
     })
   }
+}
+
+/// Whether workspace groups are in effect with the given number of
+/// connected monitors. See `UserConfig::workspace_groups_active`.
+fn workspace_groups_active(
+  config_value: &ParsedConfig,
+  monitor_count: usize,
+) -> bool {
+  !config_value.workspace_groups.is_empty() && monitor_count > 1
 }
 
 /// Gets the workspace group that contains the given workspace.
@@ -486,11 +510,13 @@ fn validate_workspace_groups(
 #[cfg(test)]
 mod tests {
   use wm_common::{
-    HiddenWindowFocusBehavior, ParsedConfig, TilingDirection,
+    HiddenWindowFocusBehavior, KeybindingCondition, ParsedConfig,
+    TilingDirection,
   };
 
   use super::{
-    validate_workspace_groups, workspace_group_for_workspace, SAMPLE_CONFIG,
+    validate_workspace_groups, workspace_group_for_workspace,
+    workspace_groups_active, SAMPLE_CONFIG,
   };
 
   const GROUPED_CONFIG: &str = r#"
@@ -593,5 +619,48 @@ workspace_groups:
   - { name: 'a', workspaces: ['2'] }",
     );
     assert!(validate_workspace_groups(&duplicate_name).is_err());
+  }
+
+  #[test]
+  fn workspace_groups_only_active_with_multiple_monitors() {
+    let grouped = parse(GROUPED_CONFIG);
+    assert!(!workspace_groups_active(&grouped, 1));
+    assert!(workspace_groups_active(&grouped, 2));
+
+    let ungrouped = parse("workspaces: [{ name: '1' }]");
+    assert!(!workspace_groups_active(&ungrouped, 2));
+  }
+
+  #[test]
+  fn parses_keybinding_conditions() {
+    let config = parse(
+      "keybindings:
+  - { commands: ['focus --workspace-group main'], bindings: ['alt+1'], when: workspace_groups_active }
+  - { commands: ['focus --workspace 1'], bindings: ['alt+1'], when: workspace_groups_inactive }
+  - { commands: ['wm-exit'], bindings: ['alt+q'] }",
+    );
+
+    let conditions = config
+      .keybindings
+      .iter()
+      .map(|kb| kb.when)
+      .collect::<Vec<_>>();
+
+    assert_eq!(
+      conditions,
+      vec![
+        Some(KeybindingCondition::WorkspaceGroupsActive),
+        Some(KeybindingCondition::WorkspaceGroupsInactive),
+        None
+      ]
+    );
+  }
+
+  #[test]
+  fn keybinding_conditions_match_groups_state() {
+    assert!(KeybindingCondition::WorkspaceGroupsActive.is_met(true));
+    assert!(!KeybindingCondition::WorkspaceGroupsActive.is_met(false));
+    assert!(KeybindingCondition::WorkspaceGroupsInactive.is_met(false));
+    assert!(!KeybindingCondition::WorkspaceGroupsInactive.is_met(true));
   }
 }

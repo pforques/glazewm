@@ -41,6 +41,10 @@ const DPI_TRANSITION_DURATION: Duration = Duration::from_millis(1500);
 /// DPI transition, to rule out a redraw loop with apps that resist.
 const DPI_TRANSITION_MAX_REASSERTS: u8 = 2;
 
+/// How long after a monitor is (dis)connected focus events from the OS are
+/// considered side effects of the change.
+const MONITOR_COUNT_CHANGE_DURATION: Duration = Duration::from_secs(3);
+
 pub struct WmState {
   /// Root node of the container tree. Monitors are the children of the
   /// root node, followed by workspaces, then split containers/windows.
@@ -78,6 +82,13 @@ pub struct WmState {
   /// DPI, mapped to when that happened and the remaining number of
   /// position reasserts.
   dpi_transitions: HashMap<Uuid, (Instant, u8)>,
+
+  /// When the number of connected monitors last changed.
+  ///
+  /// Windows are shuffled around by the OS right after a monitor is
+  /// (dis)connected, so focus events in that window of time aren't
+  /// treated as user intent (see `general.hidden_window_focus`).
+  monitor_count_changed_at: Option<Instant>,
 
   /// Configs of currently enabled binding modes.
   pub binding_modes: Vec<BindingModeConfig>,
@@ -117,6 +128,7 @@ impl WmState {
       unmanaged_or_minimized_timestamp: None,
       recently_managed_windows: HashMap::new(),
       dpi_transitions: HashMap::new(),
+      monitor_count_changed_at: None,
       binding_modes: Vec::new(),
       ignored_windows: Vec::new(),
       is_paused: false,
@@ -195,6 +207,25 @@ impl WmState {
 
   pub fn monitors(&self) -> Vec<Monitor> {
     self.root_container.monitors()
+  }
+
+  /// Whether workspace groups are in effect with the currently connected
+  /// monitors. See `UserConfig::workspace_groups_active`.
+  pub fn workspace_groups_active(&self, config: &UserConfig) -> bool {
+    config.workspace_groups_active(self.monitors().len())
+  }
+
+  /// Records that the number of connected monitors just changed.
+  pub fn mark_monitor_count_changed(&mut self) {
+    self.monitor_count_changed_at = Some(Instant::now());
+  }
+
+  /// Whether the number of connected monitors changed within the last few
+  /// seconds.
+  pub fn is_monitor_count_recently_changed(&self) -> bool {
+    self
+      .monitor_count_changed_at
+      .is_some_and(|time| time.elapsed() < MONITOR_COUNT_CHANGE_DURATION)
   }
 
   /// Records that the window with the given ID has just been managed.

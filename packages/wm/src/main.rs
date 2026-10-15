@@ -169,7 +169,11 @@ async fn start_wm(
   )?;
   let mut keybinding_listener = KeybindingListener::new(
     &config
-      .active_keybinding_configs(&[], false)
+      .active_keybinding_configs(
+        &[],
+        false,
+        wm.state.workspace_groups_active(&config),
+      )
       .flat_map(|kb| kb.bindings)
       .collect::<Vec<_>>(),
     dispatcher,
@@ -268,16 +272,24 @@ async fn start_wm(
           let _ = mouse_listener.enable(!is_paused);
         }
 
-        // Update keybinding and mouse listeners on config changes.
+        // Update keybinding and mouse listeners on config changes. Monitor
+        // changes can toggle workspace groups, which affects conditional
+        // keybindings.
         if matches!(
           wm_event,
           WmEvent::UserConfigChanged { .. }
             | WmEvent::BindingModesChanged { .. }
             | WmEvent::PauseChanged { .. }
+            | WmEvent::MonitorAdded { .. }
+            | WmEvent::MonitorRemoved { .. }
         ) {
           keybinding_listener.update(
             &config
-              .active_keybinding_configs(&wm.state.binding_modes, false)
+              .active_keybinding_configs(
+                &wm.state.binding_modes,
+                false,
+                wm.state.workspace_groups_active(&config),
+              )
               .flat_map(|kb| kb.bindings)
               .collect::<Vec<_>>(),
           );

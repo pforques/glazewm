@@ -85,11 +85,15 @@ impl WindowManager {
         handle_display_settings_changed(state, config)
       }
       PlatformEvent::Keybinding(keybinding_event) => {
+        let workspace_groups_active =
+          self.state.workspace_groups_active(config);
+
         // Find the keybinding config that matches this keybinding.
         let commands = config
           .active_keybinding_configs(
             &self.state.binding_modes,
             self.state.is_paused,
+            workspace_groups_active,
           )
           .find(|kb_config| {
             kb_config.bindings.contains(&keybinding_event.0)

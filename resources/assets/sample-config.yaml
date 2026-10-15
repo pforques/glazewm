@@ -188,6 +188,18 @@ window_rules:
 # Use `focus --workspace-group <name>` to switch groups, and
 # `move --workspace-group <name>` to move the focused window to the group's
 # workspace on the current monitor.
+#
+# Groups only apply with more than one monitor connected. With a single
+# monitor, every workspace behaves independently again; the switch happens
+# automatically when a monitor is (dis)connected. Keybindings can use
+# `when: workspace_groups_active` / `when: workspace_groups_inactive` to
+# bind the same key differently in each mode, e.g.:
+#   - commands: ['focus --workspace-group main']
+#     bindings: ['alt+1']
+#     when: workspace_groups_active
+#   - commands: ['focus --workspace 1']
+#     bindings: ['alt+1']
+#     when: workspace_groups_inactive
 workspace_groups: []
 #  - name: 'main'
 #    display_name: 'Main'

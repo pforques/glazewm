@@ -76,6 +76,15 @@ pub fn handle_window_focused(
     // workspace, either switch focus to Discord's workspace or bring
     // Discord to the focused workspace.
     if window.display_state() == DisplayState::Hidden {
+      // Right after a monitor is (dis)connected, the OS moves windows
+      // around and focuses them on its own. Restore the WM's focus instead
+      // of moving windows or switching workspaces.
+      if state.is_monitor_count_recently_changed() {
+        info!("Ignoring off-screen focus after monitor change: {window}");
+        state.pending_sync.queue_focus_change();
+        return Ok(());
+      }
+
       let focused_workspace = focused_container.workspace();
 
       match focused_workspace {
