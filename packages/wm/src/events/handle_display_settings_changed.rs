@@ -1,10 +1,15 @@
+use std::time::Instant;
+
 use anyhow::Context;
 use wm_common::try_warn;
 
 use crate::{
-  commands::monitor::{
-    add_monitor, move_bounded_workspaces_to_new_monitor, remove_monitor,
-    sort_monitors, update_monitor,
+  commands::{
+    monitor::{
+      add_monitor, move_bounded_workspaces_to_new_monitor, remove_monitor,
+      sort_monitors, update_monitor,
+    },
+    workspace::merge_overflow_workspaces,
   },
   models::{Monitor, NativeMonitorProperties},
   traits::{CommonGetters, PositionGetters, WindowGetters},
@@ -17,6 +22,10 @@ pub fn handle_display_settings_changed(
   config: &UserConfig,
 ) -> anyhow::Result<()> {
   tracing::info!("Display settings changed.");
+
+  // Milestones are logged so that a stall on this event can be located.
+  let start = Instant::now();
+  log_milestone(start, "started");
 
   let prev_monitor_count = state.monitors().len();
   let prev_groups_active = state.workspace_groups_active(config);
@@ -36,6 +45,8 @@ pub fn handle_display_settings_changed(
         })
         .try_collect::<Vec<_>>()
     }));
+
+  log_milestone(start, &format!("queried {} displays", displays.len()));
 
   let mut pending_monitors = state.monitors();
   let mut unmatched_displays = Vec::new();
@@ -80,9 +91,28 @@ pub fn handle_display_settings_changed(
   // Sort monitors by position.
   sort_monitors(&state.root_container)?;
 
-  for new_monitor in new_monitors {
-    move_bounded_workspaces_to_new_monitor(&new_monitor, state, config)?;
+  log_milestone(start, "updated monitors");
+
+  // When the number of monitors changes, monitor indices can shift and
+  // monitors can get paired with a different display, so move every bound
+  // workspace back to its monitor (not only the ones of new monitors).
+  let monitors_to_bind = if state.monitors().len() == prev_monitor_count {
+    new_monitors
+  } else {
+    state.monitors()
+  };
+
+  for monitor in monitors_to_bind {
+    move_bounded_workspaces_to_new_monitor(&monitor, state, config)?;
   }
+
+  log_milestone(start, "rebound workspaces");
+
+  // Never leave windows on an overflow workspace that shares a monitor
+  // with other workspaces (e.g. after its monitor got disconnected).
+  merge_overflow_workspaces(state, config)?;
+
+  log_milestone(start, "merged overflow workspaces");
 
   for window in state.windows() {
     // Display setting changes can spread windows out sporadically, so mark
@@ -140,7 +170,21 @@ pub fn handle_display_settings_changed(
     );
   }
 
+  // Anything slow after this point happens in the platform sync (e.g.
+  // repositioning windows).
+  log_milestone(start, "handled, syncing windows");
+
   Ok(())
+}
+
+/// Logs a milestone of the display settings change handling, with the
+/// time elapsed since `start`.
+fn log_milestone(start: Instant, milestone: &str) {
+  tracing::info!(
+    target: crate::diagnostics::LOG_TARGET,
+    "Display settings changed: {milestone} ({:?}).",
+    start.elapsed()
+  );
 }
 
 /// Finds the monitor matching the given display properties.

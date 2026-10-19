@@ -60,6 +60,13 @@ pub fn move_bounded_workspaces_to_new_monitor(
       state.workspace_by_name(&workspace_config.name);
 
     if let Some(existing_workspace) = existing_workspace {
+      if existing_workspace
+        .monitor()
+        .is_some_and(|current| current.id() == monitor.id())
+      {
+        continue;
+      }
+
       // Move workspaces that should be bound to the newly added monitor.
       move_workspace_to_monitor(
         &existing_workspace,

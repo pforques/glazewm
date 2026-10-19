@@ -200,6 +200,11 @@ window_rules:
 #   - commands: ['focus --workspace 1']
 #     bindings: ['alt+1']
 #     when: workspace_groups_inactive
+#
+# Workspaces outside of any group (e.g. activated for extra monitors) are
+# merged into the group workspace of their monitor when they end up sharing
+# a monitor with it (e.g. on disconnect), so no window gets stuck on a
+# hidden workspace.
 workspace_groups: []
 #  - name: 'main'
 #    display_name: 'Main'
