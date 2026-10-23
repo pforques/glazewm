@@ -534,12 +534,19 @@ workspaces:
     bind_to_monitor: 1
   - name: "4"
     bind_to_monitor: 0
+  - name: "5"
+    bind_to_monitor: 1
+  - name: "6"
+    bind_to_monitor: 0
 workspace_groups:
   - name: "main"
     display_name: "Main"
     workspaces: ["1", "2"]
   - name: "dev"
     workspaces: ["3", "4"]
+  - name: "perso"
+    workspaces: ["5", "6"]
+    multi_monitor_only: true
 "#;
 
   fn parse(yaml: &str) -> ParsedConfig {
@@ -566,11 +573,13 @@ workspace_groups:
       Some(TilingDirection::Horizontal)
     );
     assert!(config.window_behavior.cycle_focus);
-    assert_eq!(config.workspace_groups.len(), 2);
+    assert_eq!(config.workspace_groups.len(), 3);
     assert_eq!(
       config.workspace_groups[0].display_name.as_deref(),
       Some("Main")
     );
+    assert!(!config.workspace_groups[0].multi_monitor_only);
+    assert!(config.workspace_groups[2].multi_monitor_only);
     assert!(validate_workspace_groups(&config).is_ok());
   }
 

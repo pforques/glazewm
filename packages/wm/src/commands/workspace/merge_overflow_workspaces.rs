@@ -1,5 +1,6 @@
 use anyhow::Context;
 use tracing::info;
+use wm_common::WorkspaceGroupConfig;
 
 use super::deactivate_workspace;
 use crate::{
@@ -12,14 +13,16 @@ use crate::{
   wm_state::WmState,
 };
 
-/// Merges overflow workspaces into the workspace group member on the same
+/// Merges overflow workspaces into a reachable workspace on the same
 /// monitor.
 ///
 /// When workspace groups are configured, workspaces outside of any group
 /// (e.g. the ones activated for extra monitors) aren't reachable through
-/// the group keybindings. If such a workspace ends up sharing a monitor
-/// with another workspace (e.g. after its monitor is disconnected), its
-/// windows are moved to the monitor's group workspace and the empty
+/// the group keybindings, and neither are the workspaces of
+/// `multi_monitor_only` groups while groups are inactive (single monitor).
+/// If such a workspace ends up sharing a monitor with another workspace
+/// (e.g. after its monitor is disconnected), its windows are moved to the
+/// monitor's most recently displayed reachable workspace and the empty
 /// workspace is deactivated, so that no window gets stuck on a hidden
 /// workspace. No-op if no workspace groups are configured.
 pub fn merge_overflow_workspaces(
@@ -29,6 +32,8 @@ pub fn merge_overflow_workspaces(
   if config.value.workspace_groups.is_empty() {
     return Ok(());
   }
+
+  let groups_active = state.workspace_groups_active(config);
 
   for monitor in state.monitors() {
     let workspaces = monitor
@@ -40,10 +45,12 @@ pub fn merge_overflow_workspaces(
       .iter()
       .map(|workspace| {
         let name = workspace.config().name;
-        let is_grouped =
-          config.workspace_group_for_workspace(&name).is_some();
+        let is_reachable = is_reachable_workspace(
+          config.workspace_group_for_workspace(&name),
+          groups_active,
+        );
 
-        (name, is_grouped)
+        (name, is_reachable)
       })
       .collect::<Vec<_>>();
 
@@ -55,9 +62,10 @@ pub fn merge_overflow_workspaces(
       .workspace_by_name(&plan.target)
       .context("Merge target workspace not found.")?;
 
-    let was_source_displayed = monitor
-      .displayed_workspace()
-      .is_some_and(|displayed| plan.sources.contains(&displayed.config().name));
+    let was_source_displayed =
+      monitor.displayed_workspace().is_some_and(|displayed| {
+        plan.sources.contains(&displayed.config().name)
+      });
 
     let focused_container = state.focused_container();
     let mut is_focus_in_sources = false;
@@ -94,9 +102,7 @@ pub fn merge_overflow_workspaces(
       set_focused_descendant(&target_container, Some(&target_container));
     }
 
-    state
-      .pending_sync
-      .queue_container_to_redraw(target.clone());
+    state.pending_sync.queue_container_to_redraw(target.clone());
   }
 
   Ok(())
@@ -135,6 +141,18 @@ fn merge_workspace_into(
   deactivate_workspace(source.clone(), state)
 }
 
+/// Whether a workspace in the given group (`None` if ungrouped) can be
+/// reached through the group keybindings.
+///
+/// Ungrouped workspaces never are, and the workspaces of a
+/// `multi_monitor_only` group only are while groups are active.
+fn is_reachable_workspace(
+  group: Option<&WorkspaceGroupConfig>,
+  groups_active: bool,
+) -> bool {
+  group.is_some_and(|group| groups_active || !group.multi_monitor_only)
+}
+
 /// Which workspaces of a monitor to merge, and into which one.
 #[derive(Debug, PartialEq, Eq)]
 struct OverflowMergePlan {
@@ -145,9 +163,10 @@ struct OverflowMergePlan {
 /// Decides which overflow workspaces of a monitor to merge.
 ///
 /// Takes the workspaces of a monitor in focus order (displayed first),
-/// each with whether it belongs to a workspace group. The target is the
-/// most recently displayed grouped workspace, or the displayed workspace
-/// if none is grouped. Every other ungrouped workspace is merged into it.
+/// each with whether it is reachable (see `is_reachable_workspace`). The
+/// target is the most recently displayed reachable workspace, or the
+/// displayed workspace if none is reachable. Every other unreachable
+/// workspace is merged into it.
 ///
 /// Returns `None` if there is nothing to merge.
 fn overflow_merge_plan(
@@ -155,13 +174,13 @@ fn overflow_merge_plan(
 ) -> Option<OverflowMergePlan> {
   let target = workspaces
     .iter()
-    .find(|(_, is_grouped)| *is_grouped)
+    .find(|(_, is_reachable)| *is_reachable)
     .or_else(|| workspaces.first())
     .map(|(name, _)| name.clone())?;
 
   let sources = workspaces
     .iter()
-    .filter(|(name, is_grouped)| !is_grouped && *name != target)
+    .filter(|(name, is_reachable)| !is_reachable && *name != target)
     .map(|(name, _)| name.clone())
     .collect::<Vec<_>>();
 
@@ -170,13 +189,32 @@ fn overflow_merge_plan(
 
 #[cfg(test)]
 mod tests {
-  use super::{overflow_merge_plan, OverflowMergePlan};
+  use wm_common::WorkspaceGroupConfig;
+
+  use super::{
+    is_reachable_workspace, overflow_merge_plan, OverflowMergePlan,
+  };
 
   fn entries(workspaces: &[(&str, bool)]) -> Vec<(String, bool)> {
     workspaces
       .iter()
-      .map(|(name, is_grouped)| ((*name).to_string(), *is_grouped))
+      .map(|(name, is_reachable)| ((*name).to_string(), *is_reachable))
       .collect()
+  }
+
+  fn group(
+    workspaces: &[&str],
+    multi_monitor_only: bool,
+  ) -> WorkspaceGroupConfig {
+    WorkspaceGroupConfig {
+      name: "group".to_string(),
+      display_name: None,
+      workspaces: workspaces
+        .iter()
+        .map(|name| (*name).to_string())
+        .collect(),
+      multi_monitor_only,
+    }
   }
 
   fn plan(target: &str, sources: &[&str]) -> Option<OverflowMergePlan> {
@@ -224,5 +262,34 @@ mod tests {
     let workspaces = entries(&[("6", false), ("5", false)]);
 
     assert_eq!(overflow_merge_plan(&workspaces), plan("6", &["5"]));
+  }
+
+  #[test]
+  fn multi_monitor_only_group_is_reachable_only_with_groups_active() {
+    let main = group(&["1", "2"], false);
+    let perso = group(&["5", "6"], true);
+
+    assert!(is_reachable_workspace(Some(&main), true));
+    assert!(is_reachable_workspace(Some(&main), false));
+    assert!(is_reachable_workspace(Some(&perso), true));
+    assert!(!is_reachable_workspace(Some(&perso), false));
+    assert!(!is_reachable_workspace(None, true));
+    assert!(!is_reachable_workspace(None, false));
+  }
+
+  #[test]
+  fn merges_multi_monitor_only_desktop_on_single_monitor() {
+    // Unplugged while on the third desktop: the laptop displays WS6 and
+    // the Samsung's WS5 got moved to it; WS4 was displayed before.
+    let workspaces = entries(&[
+      ("6", false),
+      ("4", true),
+      ("2", true),
+      ("5", false),
+      ("1", true),
+      ("3", true),
+    ]);
+
+    assert_eq!(overflow_merge_plan(&workspaces), plan("4", &["6", "5"]));
   }
 }

@@ -468,6 +468,13 @@ pub struct WorkspaceGroupConfig {
   /// Names of the workspaces in the group. Each workspace should be
   /// bound to a different monitor.
   pub workspaces: Vec<String>,
+
+  /// Whether the group only exists while workspace groups are active
+  /// (more than one monitor). With a single monitor, the windows of its
+  /// workspaces are moved to the displayed workspace and its workspaces
+  /// are deactivated, instead of becoming independent workspaces.
+  #[serde(default = "default_bool::<false>")]
+  pub multi_monitor_only: bool,
 }
 
 /// Helper function for setting a default value for a boolean field.
